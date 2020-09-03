@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -31,6 +32,13 @@ type User struct {
 	Name     string             `json:"name,omitempty" bson:"name,omitempty"`
 	Email    string             `json:"email,omitempty" bson:"email,omitempty"`
 	Password string             `json:"password,omitempty" bson:"password,omitempty"`
+}
+
+type Config struct {
+	Username     string `json:"dbUser"`
+	Password     string `json:"dbPass"`
+	ClusterName  string `json:"cluster"`
+	CloudService string `json:"cloudService"`
 }
 
 var client *mongo.Client
@@ -92,10 +100,27 @@ func UserLoginEndpoint(response http.ResponseWriter, request *http.Request) {
 	json.NewEncoder(response).Encode(returnUser)
 }
 
-func main() {
+func LoadConfiguration() (Config, error) {
+	var config Config
+	configFile, err := os.Open("config.json")
+	defer configFile.Close()
+	if err != nil {
+		return config, err
+	}
+	parse := json.NewDecoder(configFile)
+	err = parse.Decode(&config)
+	return config, err
+}
 
+func main() {
 	var err error
-	client, err = mongo.NewClient(options.Client().ApplyURI("mongodb+srv://userS:Teemoteemo123@cluster0.ge7wb.azure.mongodb.net/db?retryWrites=true&w=majority"))
+	config, err := LoadConfiguration()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	client, err = mongo.NewClient(options.Client().ApplyURI("mongodb+srv://" + config.Username + ":" + config.Password + "@" + config.ClusterName + "." + config.CloudService + ".mongodb.net/db?retryWrites=true&w=majority"))
 	if err != nil {
 		log.Fatal(err)
 	}
