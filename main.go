@@ -17,14 +17,20 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type Entry struct {
-	ID          primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
-	User        primitive.ObjectID `json:"user,omitempty" bson:"user,omitempty"`
-	Date        string             `json:"date,omitempty" bson:"date,omitempty"`
-	Time        string             `json:"time,omitempty" bson:"time,omitempty"`
-	Description string             `json:"description,omitempty" bson:"description,omitempty"`
-	Weight      int32              `json:"weight,omitempty" bson:"weight,omitempty"`
-	Tags        []string           `json:"tags,omitempty" bson:"tags,omitempty"`
+type MonthEntry struct {
+	ID    primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
+	User  primitive.ObjectID `json:"user,omitempty" bson:"user,omitempty"`
+	Year  int32              `json:"year,omitempty" bson:"year,omitempty"`
+	Month int32              `json:"month,omitempty" bson:"month,omitempty"`
+	Days  []DayEntry         `json:"days,omitempty" bson:"days,omitempty"`
+}
+
+type DayEntry struct {
+	Week        int32              `json:"week,omitempty" bson:"week,omitempty"`
+	DateTime    primitive.DateTime `json:"datetime,omitempty" bson:"datetime,omitempty"`
+	Description string             `jsons:"description,omitempty" bson:"description,omitempty"`
+	Priority    int32              `json:"priority,omitempty" bson:"priority,omitempty"`
+	IsPermanent bool               `json:"ispermanent,omitempty" bson:"ispermanent,omitempty"`
 }
 
 type User struct {
@@ -43,6 +49,7 @@ type Config struct {
 
 var client *mongo.Client
 
+//User
 func UserSignupEndpoint(response http.ResponseWriter, request *http.Request) {
 	response.Header().Set("content-type", "application/json")
 
@@ -100,6 +107,85 @@ func UserLoginEndpoint(response http.ResponseWriter, request *http.Request) {
 	json.NewEncoder(response).Encode(returnUser)
 }
 
+//Calendar Entry
+func CreateMonthEntryEndpoint(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("content-type", "application/json")
+
+	var monthEntry MonthEntry
+
+	if err := json.NewDecoder(request.Body).Decode(&monthEntry); err != nil {
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
+		return
+	}
+
+	userCollection := client.Database("db_1").Collection("entries")
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+
+	result, err := userCollection.InsertOne(ctx, monthEntry)
+
+	if err != nil {
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
+		return
+	}
+
+	json.NewEncoder(response).Encode(result)
+}
+
+func CreateDayEntryEndpoint(response http.ResponseWriter, request *http.Request) {
+	response.Header().Set("content-type", "application/json")
+	param := mux.Vars(request)
+	id, _ := primitive.ObjectIDFromHex(param["id"])
+	var dayEntry DayEntry
+
+	if err := json.NewDecoder(request.Body).Decode(&dayEntry); err != nil {
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
+		return
+	}
+
+	if dayEntry.DateTime == 0 {
+		dayEntry.DateTime = primitive.NewDateTimeFromTime(time.Now())
+	}
+
+	entryCollection := client.Database("db_1").Collection("entries")
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+
+	monthEntry := bson.M{"user": id}
+	dayPush := bson.M{"$push": bson.M{"days": dayEntry}}
+	result, err := entryCollection.UpdateOne(ctx, monthEntry, dayPush)
+
+	if err != nil {
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write([]byte(`{ "message": "` + err.Error() + `" }`))
+		return
+	}
+
+	json.NewEncoder(response).Encode(result)
+}
+
+func GetEntryEndpoint(response http.ResponseWriter, request *http.Request) {
+	response.Header().Add("content-type", "application/json")
+	param := mux.Vars(request)
+	id, _ := primitive.ObjectIDFromHex(param["id"])
+	var entry MonthEntry
+	collection := client.Database("db_1").Collection("entries")
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	err := collection.FindOne(ctx, MonthEntry{User: id}).Decode(&entry)
+	if err != nil {
+		response.WriteHeader(http.StatusInternalServerError)
+		response.Write([]byte(`{"message": "` + err.Error() + `"}`))
+		return
+	}
+}
+func EditEntryEndpoint(response http.ResponseWriter, request *http.Request) {
+
+}
+func DeleteEntryEndpoint(response http.ResponseWriter, request *http.Request) {
+
+}
+
 func LoadConfiguration() (Config, error) {
 	var config Config
 	configFile, err := os.Open("config.json")
@@ -141,5 +227,8 @@ func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/user", UserSignupEndpoint).Methods("POST")
 	router.HandleFunc("/user", UserLoginEndpoint).Methods("GET")
+	router.HandleFunc("/entry/month", CreateMonthEntryEndpoint).Methods("POST")
+	router.HandleFunc("/entry/day/{id}", CreateDayEntryEndpoint).Methods("POST")
+	router.HandleFunc("/entry/{id}", GetEntryEndpoint).Methods("GET")
 	http.ListenAndServe(":12345", router)
 }
